@@ -5,9 +5,13 @@ on:
     - cron: "*/15 7-20 * * 1-5"
   workflow_dispatch:
     inputs:
-      force:
-        description: "Kirim analisa walau tidak ada sinyal"
-        default: "true"
+      mode:
+        description: "analisa = kirim analisa sekarang | backtest = uji strategi 60 hari"
+        type: choice
+        options:
+          - analisa
+          - backtest
+        default: analisa
 
 jobs:
   run:
@@ -17,10 +21,14 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+      - uses: actions/cache@v4
+        with:
+          path: state
+          key: sig-${{ github.run_id }}
+          restore-keys: sig-
       - run: pip install -r requirements.txt
-      - run: python bot.py
+      - run: python xau.py ${{ github.event.inputs.mode || 'signal' }}
         env:
           TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          FORCE: ${{ github.event.inputs.force || 'false' }}
