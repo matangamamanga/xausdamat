@@ -149,7 +149,8 @@ def atr(df, n=14):
 def _utc(df):
     df = df.copy()
     idx = df.index
-    df.index = idx.tz_localize("UTC") if idx.tz is None else idx.tz_convert("UTC")
+    idx = idx.tz_localize("UTC") if idx.tz is None else idx.tz_convert("UTC")
+    df.index = idx.as_unit("ns")  # samakan presisi waktu (Yahoo kirim detik, pandas 3 bisa mikrodetik)
     return df
 
 
@@ -164,7 +165,7 @@ def prepare(m15, h1):
     trend[(e50 < e200) & (h1["Close"] < e50)] = -1
     trend.iloc[:200] = 0  # warmup EMA200
     # candle H1 baru boleh dipakai setelah closed (start + 1 jam)
-    t = pd.DataFrame({"trend": trend.values}, index=h1.index + pd.Timedelta(hours=1))
+    t = pd.DataFrame({"trend": trend.values}, index=(h1.index + pd.Timedelta(hours=1)).as_unit("ns"))
     m15 = pd.merge_asof(m15, t, left_index=True, right_index=True, direction="backward")
     m15["trend"] = m15["trend"].fillna(0).astype(int)
 
