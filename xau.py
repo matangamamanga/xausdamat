@@ -78,7 +78,13 @@ def send_file(path, caption=""):
         )
 
 
+AI_ERR = ""
+AI_MODEL = ""
+
+
 def ai_comment(ctx):
+    """Komentar AI via Gemini. Coba beberapa nama model; alasan gagal disimpan di AI_ERR."""
+    global AI_ERR, AI_MODEL
     if not GEMINI_KEY:
         return ""
     prompt = (
@@ -86,15 +92,29 @@ def ai_comment(ctx):
         "(maks 4 kalimat, Bahasa Indonesia): kondisi pasar dan risiko utama. "
         "Jangan menjanjikan profit.\n\n" + ctx
     )
-    try:
-        url = (
-            "https://generativelanguage.googleapis.com/v1beta/models/"
-            f"{GEMINI_MODEL}:generateContent?key={GEMINI_KEY}"
-        )
-        r = requests.post(url, json={"contents": [{"parts": [{"text": prompt}]}]}, timeout=40)
-        return r.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
-    except Exception:
-        return ""
+    models = []
+    for m in (GEMINI_MODEL, "gemini-flash-latest", "gemini-2.0-flash"):
+        if m not in models:
+            models.append(m)
+    for m in models:
+        try:
+            r = requests.post(
+                f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent",
+                headers={"x-goog-api-key": GEMINI_KEY},
+                json={"contents": [{"parts": [{"text": prompt}]}]},
+                timeout=40,
+            )
+            data = r.json()
+            if not r.ok:
+                msg = str(data.get("error", {}).get("message", ""))[:150]
+                AI_ERR = f"{m}: HTTP {r.status_code} {msg}"
+                continue
+            text = data["candidates"][0]["content"]["parts"][0]["text"].strip()
+            AI_MODEL = m
+            return text
+        except Exception as ex:
+            AI_ERR = f"{m}: {type(ex).__name__}"  # sengaja tanpa detail agar key tidak bocor
+    return ""
 
 
 def get_data(interval, period):
@@ -567,7 +587,8 @@ def run_check():
         lines.append(f"Data {SYMBOL}: GAGAL - {ex}")
     lines.append("Kalender berita: " + ("OK" if fetch_events() is not None else "GAGAL"))
     if GEMINI_KEY:
-        lines.append("Gemini: " + ("OK" if ai_comment("Balas satu kata: ok") else "GAGAL (cek key/nama model)"))
+        ok_ = ai_comment("Balas satu kata: ok")
+        lines.append(f"Gemini: OK (model {AI_MODEL})" if ok_ else f"Gemini: GAGAL - {AI_ERR or 'respon kosong'}")
     send("\n".join(lines))
 
 
