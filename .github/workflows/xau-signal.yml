@@ -6,12 +6,13 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "analisa = kirim analisa sekarang | backtest = uji strategi 60 hari"
+        description: "cek = tes koneksi | analisa = kirim analisa sekarang | backtest = uji strategi 60 hari"
         type: choice
         options:
+          - cek
           - analisa
           - backtest
-        default: analisa
+        default: cek
 
 jobs:
   run:
