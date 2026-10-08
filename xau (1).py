@@ -7,6 +7,7 @@ Mode:
 """
 import os
 import sys
+import time
 import datetime as dt
 
 import numpy as np
@@ -52,13 +53,17 @@ WIB = "Asia/Jakarta"
 def send(text):
     print(text)
     if not TOKEN or not CHAT_ID:
-        return
+        raise RuntimeError(
+            "Secret TELEGRAM_TOKEN / TELEGRAM_CHAT_ID kosong. Cek nama secret persis "
+            "(huruf besar semua) di Settings > Secrets and variables > Actions."
+        )
     r = requests.post(
         f"https://api.telegram.org/bot{TOKEN}/sendMessage",
         data={"chat_id": CHAT_ID, "text": text[:4000]},
         timeout=30,
     )
-    r.raise_for_status()
+    if not r.ok:
+        raise RuntimeError(f"Telegram menolak ({r.status_code}): {r.text[:200]}")
 
 
 def send_file(path, caption=""):
@@ -95,8 +100,17 @@ def ai_comment(ctx):
 def get_data(interval, period):
     import yfinance as yf  # import di sini supaya bagian lain bisa dites tanpa jaringan
 
-    df = yf.Ticker(SYMBOL).history(interval=interval, period=period).dropna()
-    return df.iloc[:-1]  # buang candle yang belum close
+    last = "tidak diketahui"
+    for wait in (0, 5, 15):  # Yahoo sering menolak IP GitHub sesaat, coba ulang
+        time.sleep(wait)
+        try:
+            df = yf.Ticker(SYMBOL).history(interval=interval, period=period).dropna()
+            if len(df) > 60:
+                return df.iloc[:-1]  # buang candle yang belum close
+            last = f"data kosong/terlalu sedikit ({len(df)} baris)"
+        except Exception as ex:
+            last = f"{type(ex).__name__}: {ex}"
+    raise RuntimeError(f"Gagal ambil data {SYMBOL} {interval} dari Yahoo: {last}")
 
 
 # ---------------- indikator ----------------
@@ -534,9 +548,58 @@ def run_signal(force):
         print("Tidak ada sinyal.", ctx)
 
 
+def run_check():
+    """Tes koneksi: Telegram, data harga, kalender berita, Gemini."""
+    if not TOKEN or not CHAT_ID:
+        raise RuntimeError(
+            "Secret TELEGRAM_TOKEN / TELEGRAM_CHAT_ID kosong. Cek nama secret persis "
+            "(huruf besar semua) di Settings > Secrets and variables > Actions."
+        )
+    lines = ["CEK BOT", "Telegram: OK (pesan ini sampai)"]
+    lines.append("Gemini key: " + ("ada" if GEMINI_KEY else "tidak diisi (opsional)"))
+    try:
+        m15, h1 = get_data("15m", "5d"), get_data("1h", "60d")
+        lines.append(
+            f"Data {SYMBOL}: OK, M15 {len(m15)} baris, H1 {len(h1)} baris, "
+            f"harga terakhir {m15['Close'].iloc[-1]:.2f}"
+        )
+    except Exception as ex:
+        lines.append(f"Data {SYMBOL}: GAGAL - {ex}")
+    lines.append("Kalender berita: " + ("OK" if fetch_events() is not None else "GAGAL"))
+    if GEMINI_KEY:
+        lines.append("Gemini: " + ("OK" if ai_comment("Balas satu kata: ok") else "GAGAL (cek key/nama model)"))
+    send("\n".join(lines))
+
+
+ERR_FILE = "state/err.txt"
+
+
+def report_error(mode, ex):
+    msg = f"BOT ERROR ({mode}): {type(ex).__name__}: {ex}"
+    print(msg)
+    try:
+        if mode == "signal":  # cron: kirim maksimal 1x per 6 jam supaya tidak spam
+            try:
+                if time.time() - float(open(ERR_FILE).read()) < 6 * 3600:
+                    return
+            except (OSError, ValueError):
+                pass
+            os.makedirs("state", exist_ok=True)
+            open(ERR_FILE, "w").write(str(time.time()))
+        send(msg[:1500])
+    except Exception:
+        pass
+
+
 if __name__ == "__main__":
     mode = sys.argv[1] if len(sys.argv) > 1 else "signal"
-    if mode == "backtest":
-        run_backtest()
-    else:
-        run_signal(force=(mode == "analisa"))
+    try:
+        if mode == "backtest":
+            run_backtest()
+        elif mode == "cek":
+            run_check()
+        else:
+            run_signal(force=(mode == "analisa"))
+    except Exception as ex:
+        report_error(mode, ex)
+        raise
